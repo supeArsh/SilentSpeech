@@ -18,9 +18,10 @@ data/*
 *.avi
 *.mp4
 
-# Model weights and checkpoints (>50MB)
+# Model weights and checkpoints
 models/*
 !models/.gitkeep
+!models/*.pth
 !models/auto_avsr/unigram5000_units.txt
 
 # Archives
