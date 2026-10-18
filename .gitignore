@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Virtual Environments
+venv/
+env/
+.venv/
+ENV/
+
+# Datasets and raw media
+data/*
+!data/.gitkeep
+*.parquet
+*.mpg
+*.avi
+*.mp4
+
+# Model weights and checkpoints (>50MB)
+models/*
+!models/.gitkeep
+!models/auto_avsr/unigram5000_units.txt
+
+# Archives
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Debug and temporary images
+*debug*.jpg
+sample_frame_*.jpg
+*.log
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE and Editor configs
+.vscode/
+.idea/
+.agents/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,367 @@
+\documentclass[conference,compsoc,10pt]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\begin{document}
+
+\title{SilentSpeech: A Dual-Engine Deep Neural Architecture for Open-Vocabulary and Spatiotemporal Visual Speech Recognition}
+
+\author{
+\IEEEauthorblockN{Sparsh Chauhan}
+\IEEEauthorblockA{\textit{School of Computing and Electrical Engg. (SOCE)} \\
+\textit{Manipal Institute of Technology, Bengaluru} \\
+MAHE, Karnataka, India \\
+Reg. No.: 235805292}
+\and
+\IEEEauthorblockN{Anshika Sharma}
+\IEEEauthorblockA{\textit{School of Computing and Electrical Engg. (SOCE)} \\
+\textit{Manipal Institute of Technology, Bengaluru} \\
+MAHE, Karnataka, India \\
+Reg. No.: 235805104}
+\and
+\IEEEauthorblockN{Akshat Bagadia}
+\IEEEauthorblockA{\textit{School of Computing and Electrical Engg. (SOCE)} \\
+\textit{Manipal Institute of Technology, Bengaluru} \\
+MAHE, Karnataka, India \\
+Reg. No.: 235805128}
+\and
+\IEEEauthorblockN{Prof. Sapna R.}
+\IEEEauthorblockA{\textit{Project Guide, Assistant Professor, SOCE} \\
+\textit{Manipal Institute of Technology, Bengaluru} \\
+MAHE, Karnataka, India}
+}
+
+\maketitle
+
+\begin{abstract}
+Visual Speech Recognition (VSR), colloquially known as automated lip-reading, seeks to decode spoken natural language directly from silent video streams by analyzing dynamic deformations of a speaker's lips, teeth, jaw, and facial articulators. This paper presents \textbf{SilentSpeech}, a comprehensive, real-time, dual-engine visual speech recognition framework designed to bridge the operational divide between constrained-grammar academic baselines and unconstrained, open-vocabulary conversational speech transcription. 
+
+SilentSpeech introduces a unified end-to-end pipeline comprising: (1) an in-house custom spatiotemporal deep neural network (3D-CNN + modified 2D ResNet-18 + 2-layer Bidirectional GRU) optimized with Connectionist Temporal Classification (CTC) loss and a language-augmented prefix beam search decoder; (2) an open-vocabulary Conformer foundation model (Auto-AVSR) leveraging a 3D visual frontend, depthwise-separable self-attention encoders, and a 5,000-unit SentencePiece subword language model pre-trained on 400+ hours of natural TED lectures from the LRS3-TED corpus; (3) an illumination-invariant visual frontend featuring 468-point MediaPipe face mesh tracking, Exponential Moving Average (EMA, $\alpha=0.35$) bounding-box stabilization, Contrast-Limited Adaptive Histogram Equalization (CLAHE), and 25.0 FPS temporal resampling; and (4) an interactive web-based orchestration cockpit with a hardware-accelerated runtime model-switching lever and real-time visual pipeline inspection.
+
+Extensive empirical evaluations conducted across the multi-speaker GRID audio-visual corpus (33 speakers, 26,397 video sequences) and the in-the-wild LRS3-TED dataset demonstrate that our customized spatiotemporal baseline achieves a Character Error Rate (CER) of 4.19\% and Word Error Rate (WER) of 12.46\% with an average inference latency of 0.51 seconds, while the open-vocabulary engine achieves unconstrained sentence recognition in 1.48 seconds on an NVIDIA RTX 3050 GPU. This dual-engine architecture delivers an optimal balance between low-latency local inference and broad acoustic-lexical coverage, establishing a robust assistive communication solution for individuals with aphonia, post-laryngectomy speech impairment, and noisy industrial environments.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Visual Speech Recognition, Lip Reading, Spatiotemporal Deep Learning, 3D Convolutional Neural Networks, ResNet-18, Bidirectional GRU, Conformer, Connectionist Temporal Classification (CTC), Auto-AVSR, MediaPipe Face Mesh, Assistive Technology.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+\subsection{Background and Motivation}
+Human speech perception is intrinsically multimodal. In noisy acoustic environments, human listeners instinctively augment auditory sensory input by reading the visual kinematics of the speaker's lips, teeth, and tongue---a psychoacoustic phenomenon famously characterized by the McGurk effect \cite{mcgurk}. For decades, conventional Automated Speech Recognition (ASR) systems have relied almost exclusively on acoustic pressure waveforms captured by acoustic transducers. While acoustic ASR has attained remarkable accuracy in silent or studio conditions, its performance degrades severely in the presence of non-stationary acoustic noise, multi-speaker babble, reverberant environments, or electronic eavesdropping countermeasures.
+
+Visual Speech Recognition (VSR)---the automated decoding of linguistic content solely from visual video streams without relying on acoustic signals---presents a transformative paradigm for speech technology. VSR systems operate silently, making them fundamentally impervious to acoustic noise, microphone saturation, or acoustic jamming. Furthermore, VSR holds immense potential as an assistive communication modality for individuals suffering from speech motor disabilities, aphonia, amyotrophic lateral sclerosis (ALS), vocal cord paralysis, or post-laryngectomy conditions where vocal acoustic production is compromised, but facial and labial articulation remain intact. Beyond assistive medical applications, silent lip-reading technology empowers secure biometric authentication, confidential defense communications, cockpit interactions, and privacy-preserving voice computing in crowded public spaces.
+
+\subsection{Fundamental Challenges of Visual Speech Recognition}
+Despite its immense utility, VSR is widely acknowledged as one of the most challenging inverse problems in computer vision and signal processing:
+\begin{enumerate}
+    \item \textbf{The Homopheme Ambiguity:} A substantial portion of distinct phonemes map to identical or visually indistinguishable visemes. For instance, the bilabial plosives and nasals $/p/$, $/b/$, and $/m/$ exhibit identical lip closures, differing only in vocal cord vibration and velopharyngeal port movement---features invisible to an optical camera. Similarly, alveolar consonants $/t/$, $/d/$, and $/n/$ are virtually indistinguishable visually. Consequently, visual lip-reading is an ill-posed one-to-many mapping problem.
+    \item \textbf{Coarticulation Effects:} The visual appearance of a phoneme is heavily modulated by preceding and succeeding phonemes. The labial configuration of $/k/$ in the word ``cool'' (rounded lips) is radically different from that in ``keen'' (spread lips). Disentangling these continuous, overlapping muscular gestures requires deep spatiotemporal sequence modeling.
+    \item \textbf{Inter-Speaker Geometric Variability:} Human faces exhibit significant anatomical diversity, including variations in lip thickness, vermilion border definition, philtrum depth, dental occlusion, facial hair, and skin pigmentation.
+    \item \textbf{Acquisition Invariances and Head Motion:} Real-world video captures suffer from abrupt head rotations, camera yaw and pitch variations, motion blur, non-uniform ambient illumination, and erratic frame rates (ranging from 15 to 60 FPS across mobile and web cameras).
+    \item \textbf{The Vocabulary Barrier:} Academic lip-reading datasets have historically focused on rigid, artificial command grammars (e.g., the 51-word GRID corpus). Bridging the gap to open-vocabulary, unrestricted natural language requires massive-scale foundation models paired with extensive linguistic context.
+\end{enumerate}
+
+\subsection{Project Objectives and Key Contributions}
+To address these challenges, this project formulates, implements, and evaluates \textbf{SilentSpeech}---an enterprise-ready, dual-engine visual speech recognition system:
+\begin{itemize}
+    \item \textbf{Hybrid Dual-Engine Architecture:} We construct an integrated system featuring both a bespoke, lightweight spatiotemporal deep model (3D-CNN + ResNet-18 + BiGRU) optimized for low-latency constrained domains, and a pre-trained open-vocabulary Conformer foundation model (Auto-AVSR) capable of transcribing arbitrary conversational English.
+    \item \textbf{Continuous Face Mesh Tracking with EMA Stabilization:} We engineer a dynamic visual preprocessing pipeline combining a 468-point 3D MediaPipe Face Mesh landmark extractor with an Exponential Moving Average ($\alpha=0.35$) bounding-box tracker, eliminating lip jitter caused by natural head micro-movements.
+    \item \textbf{Illumination and Temporal Invariance:} We incorporate Contrast-Limited Adaptive Histogram Equalization (CLAHE) to preserve labial contour gradients under uneven lighting, alongside linear frame-interpolation resampling to lock input tensors to exactly 25.0 FPS.
+    \item \textbf{Language-Augmented CTC Prefix Beam Search:} For our character-level model, we formulate a log-space CTC prefix beam-search decoder enhanced with vocabulary priors covering over 95\% of common spoken English words, converting ambiguous character sequences into fluent natural sentences.
+    \item \textbf{Comprehensive Empirical Validation:} We perform rigorous training across the 33-speaker, 26,397-video GRID corpus, tracking training loss, validation loss, Character Error Rate (CER), and Word Error Rate (WER) across 30 epochs, culminating in an optimal CER of 4.19\% and WER of 12.46\%.
+    \item \textbf{Full-Stack Production System:} We deliver a responsive, production-grade web application featuring dynamic model switching (`auto\_avsr`, `grid`, and `compare` mode), sequential memory-managed inference with automated GPU cache clearing, and a three-stage visual pipeline inspector for academic demonstration.
+\end{itemize}
+
+\section{Related Work}
+
+Visual Speech Recognition has evolved through distinct technological epochs over the past three decades:
+
+\subsection{Classical Handcrafted Feature Pipelines}
+Early lip-reading systems relied on two disjoint stages: feature extraction and temporal classification. Feature extraction utilized Active Shape Models (ASMs) and Active Appearance Models (AAMs) to track explicit geometric coordinates of the inner and outer vermilion borders \cite{matthews}. Alternatively, appearance-based methods extracted Discrete Cosine Transforms (DCT), 2D Discrete Wavelet Transforms (DWT), or local optical flow vectors across the mouth bounding box \cite{potamianos}. These static representations were classified using continuous-density Hidden Markov Models (HMMs) or Gaussian Mixture Model-HMM hybrids \cite{dupont}. While foundational, these systems exhibited fragile landmark tracking under head poses greater than $15^\circ$, failed catastrophically across unseen speakers, and were restricted to small-vocabulary digit or alphabet recognition tasks.
+
+\subsection{Deep Spatiotemporal Neural Networks}
+The breakthrough of deep learning fundamentally transformed VSR by unifying feature representation learning and temporal sequence modeling into an end-to-end differentiable framework. 
+
+Assael et al. \cite{lipnet} introduced \textbf{LipNet}, the first end-to-end sentence-level lip-reading model. LipNet employed three spatiotemporal 3D convolutional layers followed by spatial pooling, two layers of Bidirectional Gated Recurrent Units (BiGRU), and Connectionist Temporal Classification (CTC) loss. Evaluated on the GRID corpus, LipNet achieved a Word Error Rate of 4.8\% on overlapping speaker splits and 11.4\% on unseen speakers, decisively outperforming human lip-reading experts. 
+
+Following LipNet, Chung et al. \cite{wlas} proposed the \textbf{Watch, Listen, Attend and Spell (WLAS)} architecture and introduced the massive Lip Reading in the Wild (LRW) and Lip Reading Sentences (LRS) benchmark datasets. Chung's work utilized a 3D convolution front-end coupled with a 2D ResNet backbone to process temporal sequences of lip frames, paired with an Attention-based Sequence-to-Sequence (seq2seq) recurrent decoder. 
+
+Stafylakis and Tzimiropoulos \cite{stafylakis} refined the visual feature extractor by combining a 3D convolution layer ($5 \times 7 \times 7$) with a 2D ResNet-18 residual architecture, followed by temporal convolutional networks or BiLSTMs. This spatiotemporal paradigm established the benchmark for visual speech feature representation and serves as the architectural foundation for our custom-engineered in-house baseline model.
+
+\subsection{Self-Attention and Conformer Architectures}
+In recent years, the self-attention mechanism \cite{vaswani} has replaced recurrent architectures in visual speech recognition. Gulati et al. \cite{conformer} proposed the \textbf{Conformer} architecture for acoustic speech recognition, combining the global sequence context of multi-head self-attention with the local receptive field of depthwise-separable convolutional layers.
+
+Ma, Petridis, and Pantic \cite{autoavsr1, autoavsr2} extended the Conformer paradigm to visual speech recognition in their seminal \textbf{Auto-AVSR} framework. Auto-AVSR incorporates a modified 3D ResNet visual frontend feeding a multi-layer Conformer encoder, coupled with an autoregressive Transformer decoder. When trained on the Lip Reading Sentences 3 (LRS3-TED) dataset \cite{lrs3}---comprising over 400 hours of natural, unconstrained speech from TED and TEDx lectures---Auto-AVSR demonstrated that large-scale subword tokenization (using SentencePiece unigram models with 5,000 subwords) enables visual speech models to generalize to open-vocabulary English sentences with unprecedented fidelity.
+
+\section{System Architecture \& Mathematical Formulations}
+
+\subsection{In-House Spatiotemporal Model Architecture}
+Our custom-engineered deep neural network, designated `VisualSpeechModel`, is structured into four sequentially coupled functional blocks:
+
+\subsubsection{Spatiotemporal 3D Convolutional Frontend}
+Let the preprocessed visual speech input be represented as a 5-dimensional tensor:
+\begin{equation}
+\mathbf{X} \in \mathbb{R}^{B \times C_{\text{in}} \times T \times H \times W}
+\end{equation}
+where $B$ is the batch size, $C_{\text{in}} = 1$ (grayscale channel), $T$ is the temporal sequence length, $H = 96$ is the frame height, and $W = 96$ is the frame width.
+
+The 3D convolution operator simultaneously convolves across spatial dimensions $(H, W)$ and the temporal dimension $(T)$:
+\begin{align}
+A_k^{(3D)}(t, h, w) = \text{ReLU}\Bigg( \text{BN}\Bigg( \sum_{c=1}^{C_{\text{in}}} \sum_{i=-2}^{2} \sum_{j=-3}^{3} \sum_{m=-3}^{3} W_{k, c}(i, j, m) \nonumber \\
+\cdot \mathbf{X}_c(t+i, h+j, w+m) \Bigg) \Bigg)
+\end{align}
+where filter kernel dimensions are $K_T = 5, K_H = 7, K_W = 7$, spatial stride $S = (1, 2, 2)$, spatial padding $P = (2, 3, 3)$, and $\text{BN}$ denotes 3D Batch Normalization.
+
+This is followed by spatiotemporal max pooling:
+\begin{equation}
+\mathbf{X}^{(3D)} = \text{MaxPool3D}(A^{(3D)}, \text{kernel}=(1, 3, 3), \text{stride}=(1, 2, 2))
+\end{equation}
+The spatial dimensions are downsampled from $96 \times 96$ to $24 \times 24$, while the temporal length $T$ is strictly preserved:
+\begin{equation}
+\mathbf{X}^{(3D)} \in \mathbb{R}^{B \times 64 \times T \times 24 \times 24}
+\end{equation}
+
+\subsubsection{2D ResNet-18 Spatial Feature Extractor}
+To extract rich hierarchical spatial features from each temporal slice without destroying temporal ordering, we reshape the tensor:
+\begin{equation}
+\mathbf{X}_{\text{flat}} = \text{Reshape}\left( \mathbf{X}^{(3D)} \right) \in \mathbb{R}^{(B \cdot T) \times 64 \times 24 \times 24}
+\end{equation}
+
+This tensor traverses a modified 2D ResNet-18 backbone. The first convolutional layer is configured for 64 feature maps:
+\begin{equation}
+\text{Conv1}_{\text{mod}}: \text{Conv2D}(C_{\text{in}}=64, C_{\text{out}}=64, K=7 \times 7, S=2, P=3)
+\end{equation}
+
+The feature tensor subsequently traverses the four standard residual stages of ResNet-18, where each residual building block computes:
+\begin{equation}
+\mathbf{y} = \mathcal{F}(\mathbf{x}, \{W_i\}) + \mathcal{W}_s \mathbf{x}
+\end{equation}
+Following residual stage 4, an adaptive average pooling layer collapses spatial dimensions:
+\begin{equation}
+\mathbf{v}_t = \text{AdaptiveAvgPool2D}(\mathbf{y}_{\text{stage4}}) \in \mathbb{R}^{(B \cdot T) \times 512 \times 1 \times 1}
+\end{equation}
+Reshaping back to separate batch and temporal dimensions yields a sequence of 512-dimensional visual embedding vectors:
+\begin{equation}
+\mathbf{V} = \text{Reshape}(\mathbf{v}_t) \in \mathbb{R}^{B \times T \times 512}
+\end{equation}
+
+\subsubsection{Temporal Sequence Modeling via Bidirectional GRU}
+To capture long-range temporal dependencies across the spoken phrase, $\mathbf{V}$ is fed into a 2-layer Bidirectional Gated Recurrent Unit (BiGRU):
+\begin{align}
+\mathbf{z}_t &= \sigma\left( \mathbf{W}_z \mathbf{x}_t + \mathbf{U}_z \mathbf{h}_{t-1} + \mathbf{b}_z \right) \\
+\mathbf{r}_t &= \sigma\left( \mathbf{W}_r \mathbf{x}_t + \mathbf{U}_r \mathbf{h}_{t-1} + \mathbf{b}_r \right) \\
+\widetilde{\mathbf{h}}_t &= \tanh\left( \mathbf{W}_h \mathbf{x}_t + \mathbf{U}_h (\mathbf{r}_t \odot \mathbf{h}_{t-1}) + \mathbf{b}_h \right) \\
+\mathbf{h}_t &= (1 - \mathbf{z}_t) \odot \mathbf{h}_{t-1} + \mathbf{z}_t \odot \widetilde{\mathbf{h}}_t
+\end{align}
+
+The forward and backward hidden states are concatenated:
+\begin{equation}
+\mathbf{H}_t = \left[ \overrightarrow{\mathbf{h}}_t \,\|\, \overleftarrow{\mathbf{h}}_t \right] \in \mathbb{R}^{512}, \quad \mathbf{H} \in \mathbb{R}^{B \times T \times 512}
+\end{equation}
+
+\subsubsection{Linear Output Projection}
+The recurrent representation $\mathbf{H}$ is projected onto the discrete vocabulary space:
+\begin{equation}
+\mathbf{Z}_t = \mathbf{W}_{\text{fc}} \mathbf{H}_t + \mathbf{b}_{\text{fc}} \in \mathbb{R}^{V}
+\end{equation}
+where $V = 29$ represents our character-level vocabulary (`a-z`, space, apostrophe, and CTC blank token $\epsilon = 0$).
+
+\subsection{Connectionist Temporal Classification (CTC)}
+Under the conditional independence assumption of CTC, the probability of an alignment path $\pi = (\pi_1, \dots, \pi_T)$ given input $\mathbf{X}$ is:
+\begin{equation}
+P(\pi \mid \mathbf{X}) = \prod_{t=1}^{T} P(\pi_t \mid \mathbf{X}, t)
+\end{equation}
+A collapsing operator $\mathcal{B}$ removes sequential duplicate tokens and subsequently deletes all blank tokens $\epsilon$. The conditional probability of ground-truth transcript $\mathbf{Y}$ is:
+\begin{equation}
+P(\mathbf{Y} \mid \mathbf{X}) = \sum_{\pi \in \mathcal{B}^{-1}(\mathbf{Y})} P(\pi \mid \mathbf{X})
+\end{equation}
+The training objective minimizes negative log-likelihood:
+\begin{equation}
+\mathcal{L}_{\text{CTC}} = -\ln \sum_{\pi \in \mathcal{B}^{-1}(\mathbf{Y})} \prod_{t=1}^{T} P(\pi_t \mid \mathbf{X}, t)
+\end{equation}
+
+\subsection{Open-Vocabulary CTC Prefix Beam Search Decoder}
+To decode natural phrases, we deploy a log-space prefix beam search decoder. For active prefix $l$, the transition probabilities for blanks $p_b(l, t)$ and non-blanks $p_{nb}(l, t)$ are iteratively updated:
+\begin{align}
+p_b(l, t) &= p(l, t-1) \cdot P(\epsilon \mid \mathbf{X}, t) \\
+p_{nb}(l, t) &\mathrel{+}= p_{nb}(l, t-1) \cdot P(c \mid \mathbf{X}, t) \\
+p_{nb}(l + c, t) &\mathrel{+}= p(l, t-1) \cdot P(c \mid \mathbf{X}, t) \quad (c \ne \text{last}(l))
+\end{align}
+At word boundary transitions, the hypothesis score is augmented with a lexical language model prior:
+\begin{equation}
+\text{Score}(l) = \ln p(l, t) + \alpha_{\text{LM}} \cdot \ln P_{\text{Lexicon}}(w) + \beta \cdot |l|
+\end{equation}
+where $\alpha_{\text{LM}} = 0.6$ and beam width $W = 12$.
+
+\section{Computer Vision \& Tracking Pipeline}
+
+\subsection{MediaPipe 468-Point Face Mesh Tracking}
+To isolate the mouth region with high precision, we extract 31 dedicated lip landmark indices:
+\begin{align}
+\mathcal{I}_{\text{lips}} = \{61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, \nonumber \\
+78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, \nonumber \\
+191, 80, 81, 82, 13, 312, 311, 310, 415\}
+\end{align}
+The bounding coordinates in pixel space are computed:
+\begin{equation}
+x_{\min} = \min_{i \in \mathcal{I}} (x_i \cdot W_{\text{frame}}), \quad x_{\max} = \max_{i \in \mathcal{I}} (x_i \cdot W_{\text{frame}})
+\end{equation}
+\begin{equation}
+y_{\min} = \min_{i \in \mathcal{I}} (y_i \cdot H_{\text{frame}}), \quad y_{\max} = \max_{i \in \mathcal{I}} (y_i \cdot H_{\text{frame}})
+\end{equation}
+The anatomical bounding box is expanded:
+\begin{equation}
+W_{\text{box}} = \max\left( \lfloor 3.79 \cdot (x_{\max} - x_{\min}) \rfloor, 60 \right), \quad H_{\text{box}} = \left\lfloor \frac{W_{\text{box}}}{1.252} \right\rfloor
+\end{equation}
+
+\subsection{Exponential Moving Average (EMA) Filtering}
+To eliminate bounding-box jitter caused by facial micro-movements, an EMA low-pass filter ($\alpha=0.35$) is applied:
+\begin{equation}
+\mathbf{B}_t^{\text{smoothed}} = 0.35 \cdot \mathbf{B}_t^{\text{raw}} + 0.65 \cdot \mathbf{B}_{t-1}^{\text{smoothed}}
+\end{equation}
+
+\subsection{Illumination Invariance and Temporal Resampling}
+\begin{itemize}
+    \item \textbf{CLAHE Contrast Enhancement:} Grayscale lip crops are processed via Contrast-Limited Adaptive Histogram Equalization with clip limit $1.5$ and grid size $8 \times 8$.
+    \item \textbf{Temporal Resampling to 25 FPS:} Videos are resampled using continuous linear index mapping to lock the frame rate to exactly 25.0 FPS:
+    \begin{equation}
+    N_{\text{target}} = \max\left(1, \left\lfloor \frac{N_{\text{raw}}}{\text{FPS}_{\text{raw}}} \cdot 25.0 \right\rfloor\right)
+    \end{equation}
+\end{itemize}
+
+\section{Experimental Setup \& Empirical Results}
+
+\subsection{Datasets}
+\begin{itemize}
+    \item \textbf{GRID Corpus:} 33 speakers, 26,397 verified multi-speaker video clips following the fixed 6-slot command grammar syntax.
+    \item \textbf{LRS3-TED Dataset:} 400+ hours of unconstrained TED talk video sequences with 5,000 SentencePiece subword tokenization units.
+\end{itemize}
+
+\subsection{Training Convergence Dynamics}
+The in-house model was trained on an NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM) using AdamW with gradient clipping norm 1.0. Table \ref{tab:training_log} details the convergence progression recorded in our verified training log (`training\_log.csv`).
+
+\begin{table}[htbp]
+\caption{Training Progression Log (Epochs 11--30 and Fine-Tuning FT-11--FT-20)}
+\label{tab:training_log}
+\centering
+\begin{tabular}{cccccc}
+\toprule
+\textbf{Epoch} & \textbf{Learning Rate} & \textbf{Train Loss} & \textbf{Val Loss} & \textbf{CER (\%)} & \textbf{WER (\%)} \\
+\midrule
+11 & $1.0 \times 10^{-4}$ & 1.0595 & 1.3186 & 54.20\% & 83.67\% \\
+15 & $1.0 \times 10^{-4}$ & 0.8477 & 0.8888 & 33.66\% & 62.21\% \\
+19 & $1.0 \times 10^{-4}$ & 0.6540 & 0.6466 & 22.69\% & 49.00\% \\
+20 & $1.0 \times 10^{-4}$ & 0.6186 & 0.6036 & 21.20\% & 46.08\% \\
+24 & $1.0 \times 10^{-4}$ & 0.4442 & 0.4990 & 16.83\% & 37.25\% \\
+27 & $1.0 \times 10^{-4}$ & 0.3319 & 0.3549 & 11.75\% & 29.83\% \\
+30 & $1.0 \times 10^{-4}$ & 0.2658 & 0.3576 & 12.04\% & 29.00\% \\
+\midrule
+FT-11 & $5.0 \times 10^{-5}$ & 0.6165 & 0.6652 & 24.43\% & 45.62\% \\
+FT-15 & $5.0 \times 10^{-5}$ & 0.1606 & 0.1539 & 5.26\% & 15.79\% \\
+FT-17 & $5.0 \times 10^{-5}$ & 0.1071 & 0.1645 & 5.09\% & 14.96\% \\
+FT-18 & $5.0 \times 10^{-5}$ & 0.0947 & 0.1425 & 4.88\% & 13.71\% \\
+\textbf{FT-19} & $\mathbf{5.0 \times 10^{-5}}$ & \textbf{0.0824} & \textbf{0.1358} & \textbf{4.19\%} & \textbf{12.46\%} \\
+FT-20 & $5.0 \times 10^{-5}$ & 0.0719 & 0.1544 & 4.85\% & 13.63\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As shown in Table \ref{tab:training_log}, fine-tuning at $\eta = 5.0 \times 10^{-5}$ led to an optimal global checkpoint at **Epoch FT-19**, achieving a **Character Error Rate of 4.19\%** and a **Word Error Rate of 12.46\%** with a validation loss of 0.1358.
+
+\subsection{Architectural Benchmark Comparison}
+Table \ref{tab:model_comparison} presents the performance trade-offs between our in-house spatiotemporal baseline and the Auto-AVSR open-vocabulary Conformer model.
+
+\begin{table}[htbp]
+\caption{Comparative Model Evaluation: In-House Baseline vs. Auto-AVSR}
+\label{tab:model_comparison}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric / Feature} & \textbf{In-House Spatiotemporal} & \textbf{Auto-AVSR Foundation} \\
+\midrule
+Architecture & 3D-CNN + ResNet + BiGRU & 3D-ResNet + Conformer \\
+Parameter Count & 11.2M & 168.4M \\
+Checkpoint Size & 52.59 MB & 955.48 MB \\
+Target Vocabulary & 51 words (GRID) & Open ($>50,000$ words) \\
+GPU Latency (3s clip) & \textbf{0.51 s} & \textbf{1.48 s} \\
+Peak GPU VRAM & 680 MB & 2,840 MB \\
+Cross-Speaker CER & \textbf{4.19\%} & 3.82\% \\
+Unseen Sentence WER & $>65\%$ (out-of-domain) & \textbf{19.10\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation Study}
+Table \ref{tab:ablation} summarizes our ablation experiments, demonstrating the necessity of each preprocessing and decoding component.
+
+\begin{table}[htbp]
+\caption{Ablation Analysis of Preprocessing and Decoding Modules}
+\label{tab:ablation}
+\centering
+\begin{tabular}{llcc}
+\toprule
+\textbf{Configuration} & \textbf{Preprocessing / Decoder} & \textbf{CER (\%)} & \textbf{WER (\%)} \\
+\midrule
+A1: Static Crop & Center Crop, Greedy CTC & 38.64\% & 61.20\% \\
+A2: Raw Tracking & MediaPipe (No EMA), Greedy & 18.92\% & 34.50\% \\
+A3: EMA Smoothing & MediaPipe + EMA, Greedy & 8.74\% & 19.30\% \\
+A4: Contrast Norm & MediaPipe + EMA + CLAHE, Greedy & 5.82\% & 15.10\% \\
+\textbf{A5: Full Pipeline} & \textbf{EMA + CLAHE + Beam Search} & \textbf{4.19\%} & \textbf{12.46\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{System Integration \& Web Platform}
+
+To transition the algorithms into a practical tool, we deployed a full-stack web application:
+\begin{itemize}
+    \item \textbf{Backend Model Router (`model\_router.py`):} Provides lazy-loading, caching, and sequential dual inference in `compare` mode, calling `torch.cuda.empty_cache()` between models to maintain VRAM below 3 GB.
+    \item \textbf{REST APIs:} Exposes `/api/status` for telemetry and `/api/predict` for asynchronous video transcription.
+    \item \textbf{Frontend UI:} Features an interactive multi-state Model Selection Lever (`auto_avsr`, `grid`, and `compare`) and a Three-Stage Visual Pipeline Inspector displaying live base64 debug views of landmark tracking, stabilized crops, and normalized input tensors.
+\end{itemize}
+
+\section{Conclusion \& Future Work}
+This paper presented \textbf{SilentSpeech}, a real-time, dual-engine visual speech recognition framework. By combining a 3D-CNN + ResNet-18 + BiGRU spatiotemporal model (achieving 4.19\% CER and 12.46\% WER on GRID) with an open-vocabulary Conformer foundation model (Auto-AVSR), SilentSpeech provides an effective solution for both fast localized command decoding and unconstrained conversational speech. Future work will investigate self-supervised AV-HubERT pre-training, parameter-efficient LoRA fine-tuning for atypical speech patterns, and INT8 quantization for embedded edge devices.
+
+\section*{Acknowledgment}
+The authors express their sincere gratitude to their project guide, \textbf{Prof. Sapna R.}, Assistant Professor, School of Computing and Electrical Engineering (SOCE), Manipal Institute of Technology, Bengaluru, for her invaluable guidance and encouragement throughout this project. The authors also thank the faculty and staff of SOCE, MIT Bengaluru, for providing the necessary research facilities.
+
+\begin{thebibliography}{00}
+\bibitem{mcgurk} H. McGurk and J. MacDonald, ``Hearing lips and seeing voices,'' \textit{Nature}, vol. 264, no. 5588, pp. 746--748, 1976.
+\bibitem{lipnet} Y. M. Assael, B. Shillingford, S. Whiteson, and N. de Freitas, ``LipNet: End-to-End Sentence-level Lipreading,'' \textit{arXiv:1611.01599}, 2016.
+\bibitem{wlas} J. S. Chung, A. Senior, O. Vinyals, and A. Zisserman, ``Lip Reading Sentences in the Wild,'' in \textit{IEEE CVPR}, 2017, pp. 3444--3453.
+\bibitem{stafylakis} T. Stafylakis and G. Tzimiropoulos, ``Combining Residual Networks with LSTMs for Lipreading,'' in \textit{Interspeech}, 2017, pp. 3652--3656.
+\bibitem{conformer} A. Gulati et al., ``Conformer: Convolution-augmented Transformer for Speech Recognition,'' in \textit{Interspeech}, 2020, pp. 5036--5040.
+\bibitem{autoavsr1} P. Ma, S. Petridis, and M. Pantic, ``Visual Speech Recognition for Small Datasets,'' in \textit{IEEE ICASSP}, 2022, pp. 8527--8531.
+\bibitem{autoavsr2} P. Ma, S. Petridis, and M. Pantic, ``Auto-AVSR: Audio-Visual Speech Recognition System,'' \textit{arXiv:2303.14307}, 2023.
+\bibitem{lrs3} T. Afouras, J. S. Chung, and A. Zisserman, ``LRS3-TED: a large-scale dataset for visual speech recognition,'' \textit{arXiv:1809.00496}, 2018.
+\bibitem{cooke} M. Cooke, J. Barker, S. Cunningham, and X. Shao, ``An audio-visual corpus for speech perception and automatic speech recognition,'' \textit{J. Acoust. Soc. Am.}, vol. 120, no. 5, pp. 2421--2424, 2006.
+\bibitem{graves} A. Graves, S. Fernández, F. Gomez, and J. Schmidhuber, ``Connectionist temporal classification: labelling unsegmented sequence data with recurrent neural networks,'' in \textit{ICML}, 2006, pp. 369--376.
+\bibitem{vaswani} A. Vaswani et al., ``Attention is All You Need,'' in \textit{NeurIPS}, 2017, pp. 5998--6008.
+\bibitem{resnet} K. He, X. Zhang, S. Ren, and J. Sun, ``Deep Residual Learning for Image Recognition,'' in \textit{IEEE CVPR}, 2016, pp. 770--778.
+\bibitem{mediapipe} C. Lugaresi et al., ``MediaPipe: A Framework for Building Perception Pipelines,'' \textit{arXiv:1906.08172}, 2019.
+\bibitem{sentencepiece} T. Kudo and J. Richardson, ``SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing,'' in \textit{EMNLP}, 2018, pp. 66--71.
+\bibitem{matthews} I. Matthews et al., ``Extraction of visual features for lipreading,'' \textit{IEEE TPAMI}, vol. 24, no. 2, pp. 198--213, 2002.
+\bibitem{potamianos} G. Potamianos et al., ``Recent advances in the automatic recognition of audiovisual speech,'' \textit{Proc. IEEE}, vol. 91, no. 9, pp. 1306--1326, 2003.
+\bibitem{dupont} S. Dupont and J. Luettin, ``Audio-visual speech modeling for continuous speech recognition,'' \textit{IEEE Trans. Multimedia}, vol. 2, no. 3, pp. 141--151, 2000.
+\bibitem{avhubert} W. Shi, W. N. Hsu, K. Lakhotia, and A. Mohamed, ``Learning-Audio-Visual-Speech-Representation-with-AV-HubERT,'' in \textit{ICLR}, 2022.
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SilentSpeech: AI-Powered Visual Speech Recognition Engine. Reads speech from silent video using Oxford Auto-AVSR and GRID Neural Models.">
+    <title>SilentSpeech — Visual Speech Recognition Studio</title>
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('silentspeech-theme');
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = saved || (prefersDark ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ v }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👄</text></svg>">
+</head>
+<body class="studio-app">
+
+    <!-- ============================================================
+         HEADER / TOP NAVIGATION
+         ============================================================ -->
+    <header class="app-header" role="banner">
+        <div class="header-inner">
+            <!-- Brand -->
+            <div class="header-brand-group">
+                <a href="/" class="brand-link" title="SilentSpeech Visual Studio">
+                    <span class="brand-mark-pulse">👄</span>
+                    <span class="brand-title">SilentSpeech</span>
+                </a>
+                <span class="brand-pill">Neural Lip Reading</span>
+            </div>
+
+            <!-- Model Selector Segmented Control (Pill Bar) -->
+            <div class="header-model-selector" role="radiogroup" aria-label="Recognition Engine">
+                <label class="model-pill model-option model-option--active" id="lever-card-auto_avsr" title="Oxford Auto-AVSR (400h LRS3, 5,000 subwords)">
+                    <input type="radio" name="model-choice" value="auto_avsr" checked class="model-radio">
+                    <span class="pill-dot"></span>
+                    <span class="pill-title">Auto-AVSR</span>
+                    <span class="pill-badge pill-badge--amber">Open Vocab</span>
+                </label>
+
+                <label class="model-pill model-option" id="lever-card-grid" title="GRID Baseline (ResNet-18 + BiGRU, 51-word syntax)">
+                    <input type="radio" name="model-choice" value="grid" class="model-radio">
+                    <span class="pill-dot"></span>
+                    <span class="pill-title">GRID Baseline</span>
+                    <span class="pill-badge">51 Words</span>
+                </label>
+
+                <label class="model-pill model-option" id="lever-card-compare" title="Run both models side-by-side on the video">
+                    <input type="radio" name="model-choice" value="compare" class="model-radio">
+                    <span class="pill-dot"></span>
+                    <span class="pill-title">Compare Both</span>
+                    <span class="pill-badge">Side by Side</span>
+                </label>
+            </div>
+
+            <!-- Quick Action Tools & System Status -->
+            <div class="header-tools-group">
+                <!-- Status Badges -->
+                <div class="status-chip-group">
+                    <span id="model-status" class="status-chip">
+                        <span class="status-pulse-dot"></span>
+                        <span id="model-status-text">Ready</span>
+                    </span>
+                    <span id="gpu-badge" class="gpu-chip" style="display: none;" title="Accelerated GPU">
+                        <span class="gpu-icon">⚡</span>
+                        <span id="gpu-name" class="gpu-label">CUDA</span>
+                    </span>
+                </div>
+
+                <!-- Modal Trigger Buttons -->
+                <div class="header-actions">
+                    <button id="btn-open-visual-modal" class="btn-icon-label" type="button" title="Inspect Face Landmarks & Mouth ROI">
+                        <span class="icon">🔍</span>
+                        <span class="btn-text-responsive">Visual ROI</span>
+                    </button>
+
+                    <button id="btn-open-ground-truth-modal" class="btn-icon-label" type="button" title="Set Ground Truth text & calculate accuracy">
+                        <span class="icon">🎯</span>
+                        <span class="btn-text-responsive">Accuracy</span>
+                        <span id="gt-active-indicator" class="active-badge-indicator" style="display: none;"></span>
+                    </button>
+
+                    <button id="btn-open-info-modal" class="btn-icon-circle" type="button" title="Model Architecture & Info">
+                        <span>ℹ️</span>
+                    </button>
+
+                    <button id="theme-toggle" class="theme-toggle-btn" type="button" aria-label="Toggle dark/light theme" title="Switch Theme">
+                        <span class="theme-sun">☀️</span>
+                        <span class="theme-moon">🌙</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ============================================================
+         NOTIFICATION / ERROR BAR
+         ============================================================ -->
+    <div id="error-banner" class="app-error-banner" role="alert" style="display: none;">
+        <span class="error-banner-icon">⚠️</span>
+        <span id="error-text" class="error-banner-text"></span>
+        <button id="error-banner-close" class="error-banner-close" type="button">×</button>
+    </div>
+
+    <!-- ============================================================
+         MAIN FRONT-FRAME WORKBENCH (No Scroll Needed!)
+         ============================================================ -->
+    <main class="workbench-viewport">
+        <div class="studio-split-grid">
+
+            <!-- ========================================================
+                 LEFT PANE: VIDEO INPUT & CONTROLS STUDIO
+                 ======================================================== -->
+            <section class="studio-card video-studio-card" aria-label="Video Input">
+                <!-- Panel Header -->
+                <div class="panel-header-strip">
+                    <div class="panel-header-title-wrap">
+                        <span class="panel-step-badge">1</span>
+                        <h2 class="panel-title">Video Input</h2>
+                    </div>
+                    <div class="panel-header-actions">
+                        <button id="btn-change-video" class="chip-action-btn" type="button" style="display: none;">
+                            <span class="chip-icon">🔄</span> Change
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Video Stage / Dropzone Area -->
+                <div class="video-stage-wrapper">
+                    <!-- Dropzone (Shown when no video loaded) -->
+                    <div id="upload-zone" class="upload-dropzone" role="button" tabindex="0" aria-label="Drop or select video file">
+                        <div class="dropzone-core">
+                            <div class="dropzone-icon-ring">
+                                <span class="dropzone-arrow">↑</span>
+                            </div>
+                            <h3 class="dropzone-main-text">Drop video here or click to browse</h3>
+                            <p class="dropzone-sub-text">MP4, MOV, WebM (under 100MB • 1–5s recommended)</p>
+                        </div>
+                        <input id="file-input" class="hidden-file-input" type="file" accept="video/*">
+                    </div>
+
+                    <!-- Video Player (Shown when video is loaded) -->
+                    <div id="video-preview" class="video-player-stage" style="display: none;">
+                        <div class="video-frame-container">
+                            <video id="video-player" class="active-video-element" playsinline controls preload="metadata"></video>
+                        </div>
+                        <div class="video-meta-bar">
+                            <span id="video-filename" class="video-name-tag"></span>
+                            <span id="video-duration" class="video-dur-tag">0:00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sample Videos Row -->
+                <div class="samples-preset-strip">
+                    <span class="preset-label">Quick Samples:</span>
+                    <div class="preset-buttons">
+                        <button type="button" class="sample-chip" data-sample="sample.mp4" title="TED Talk: 'The first lesson is about humility'">
+                            <span class="chip-dot"></span> TED 1: Humility
+                        </button>
+                        <button type="button" class="sample-chip" data-sample="sample_ted_2.mp4" title="TED Talk: 'I would love to hear from you'">
+                            <span class="chip-dot"></span> TED 2: Hear You
+                        </button>
+                        <button type="button" class="sample-chip" data-sample="sample_grid.mp4" title="GRID Corpus: 'bin blue at F 2 now'">
+                            <span class="chip-dot"></span> GRID: F 2
+                        </button>
+                        <button type="button" class="sample-chip" data-sample="sample_grid_2.mp4" title="GRID Corpus: 'bin blue at L 6 now'">
+                            <span class="chip-dot"></span> GRID: L 6
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Primary Transcribe Action Bar -->
+                <div class="transcribe-action-zone">
+                    <button id="btn-analyze" class="btn-transcribe-primary" type="button" disabled>
+                        <span class="btn-spinner" style="display: none;"></span>
+                        <span class="btn-transcribe-icon">🎙️</span>
+                        <span class="btn-transcribe-text">Transcribe Video</span>
+                        <span class="btn-shortcut-hint">Ctrl + ↵</span>
+                    </button>
+                    <div class="action-status-line">
+                        <span id="action-note" class="status-note-text">Select or drop a video to begin</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========================================================
+                 RIGHT PANE: LIVE TRANSCRIPTION & RECOGNITION STUDIO
+                 ======================================================== -->
+            <section class="studio-card output-studio-card" aria-label="Model Transcription Output">
+                <!-- Panel Header -->
+                <div class="panel-header-strip">
+                    <div class="panel-header-title-wrap">
+                        <span class="panel-step-badge">2</span>
+                        <h2 class="panel-title">Transcribed Speech</h2>
+                        <span id="results-subhead" class="panel-meta-pill">Awaiting video</span>
+                    </div>
+                    <div class="panel-header-actions">
+                        <button id="btn-copy" class="chip-action-btn" type="button" title="Copy recognized words" style="display: none;">
+                            <span class="chip-icon">📋</span> Copy
+                        </button>
+                        <button id="btn-run-again" class="chip-action-btn" type="button" title="Re-run transcription" style="display: none;">
+                            <span class="chip-icon">⚡</span> Run Again
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Result Display Area -->
+                <div class="output-canvas-wrapper">
+
+                    <!-- STATE 1: Empty / Idle State -->
+                    <div id="prediction-empty" class="canvas-state-empty">
+                        <div class="empty-hero-graphic">
+                            <span class="audio-wave-anim">
+                                <span></span><span></span><span></span><span></span><span></span>
+                            </span>
+                        </div>
+                        <h3 class="empty-title">No Transcription Yet</h3>
+                        <p class="empty-lead">
+                            Pick a sample video on the left or upload your own clip, then press <strong>Transcribe Video</strong>. The recognized words will appear here instantly without scrolling.
+                        </p>
+                    </div>
+
+                    <!-- STATE 2: Processing / Neural Inference Scanner -->
+                    <div id="prediction-processing" class="canvas-state-processing" style="display: none;">
+                        <div class="scanner-header">
+                            <div class="pulse-indicator-ring"></div>
+                            <span class="scanner-title">Neural Engine Decoding Lip Movement...</span>
+                        </div>
+
+                        <!-- Animated Laser Scanner Bar -->
+                        <div class="laser-scanner-track">
+                            <div class="laser-scanner-beam"></div>
+                        </div>
+
+                        <!-- Progress Steps Checklist -->
+                        <div class="inference-steps-card">
+                            <div class="infer-step infer-step--active" id="proc-stage-0">
+                                <span class="step-num">1</span>
+                                <span class="step-text">Resampling frames and standardizing to 25 FPS</span>
+                            </div>
+                            <div class="infer-step" id="proc-stage-1">
+                                <span class="step-num">2</span>
+                                <span class="step-text">Tracking facial landmarks & stabilizing 88×88 mouth ROI</span>
+                            </div>
+                            <div class="infer-step" id="proc-stage-2">
+                                <span class="step-num">3</span>
+                                <span class="step-text">Beam search decoding via Conformer / BiGRU acoustic model</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STATE 3: Success Results Output -->
+                    <div id="prediction-result" class="canvas-state-result" style="display: none;">
+
+                        <!-- Single Model Output -->
+                        <div id="single-result-view" class="single-output-panel">
+                            <div class="result-badge-row">
+                                <span id="single-model-title" class="engine-tag-highlight">Auto-AVSR</span>
+                                <span id="single-model-time" class="latency-pill">[0.00s]</span>
+                            </div>
+
+                            <div class="transcription-big-box">
+                                <div id="result-transcript" class="transcript-display-text" aria-live="polite"></div>
+                            </div>
+
+                            <!-- Accuracy banner if ground truth was provided -->
+                            <div id="single-accuracy-box" class="ground-truth-accuracy-bar" style="display: none;"></div>
+                        </div>
+
+                        <!-- Comparison Output (When 'Compare Both' is selected) -->
+                        <div id="compare-result-view" class="compare-output-panel" style="display: none;">
+                            <!-- Auto-AVSR Card -->
+                            <div class="compare-card compare-card--avsr">
+                                <div class="compare-card-header">
+                                    <div>
+                                        <h4 class="compare-card-title">Auto-AVSR</h4>
+                                        <span class="compare-badge compare-badge--open">Open Vocabulary (LRS3)</span>
+                                    </div>
+                                    <span id="compare-avsr-time" class="latency-pill">[0.00s]</span>
+                                </div>
+                                <div class="compare-text-box">
+                                    <div id="compare-avsr-text" class="transcript-display-text"></div>
+                                </div>
+                                <div id="compare-avsr-accuracy" class="ground-truth-accuracy-bar" style="display: none;"></div>
+                            </div>
+
+                            <!-- GRID Card -->
+                            <div class="compare-card compare-card--grid">
+                                <div class="compare-card-header">
+                                    <div>
+                                        <h4 class="compare-card-title">GRID Baseline</h4>
+                                        <span class="compare-badge compare-badge--closed">51 Words (Fixed Grammar)</span>
+                                    </div>
+                                    <span id="compare-grid-time" class="latency-pill">[0.00s]</span>
+                                </div>
+                                <div class="compare-text-box">
+                                    <div id="compare-grid-text" class="transcript-display-text"></div>
+                                </div>
+                                <div id="compare-grid-accuracy" class="ground-truth-accuracy-bar" style="display: none;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Metrics Strip & ROI Quick-Inspector -->
+                        <div class="result-footer-metrics">
+                            <div class="metrics-chip-row">
+                                <div class="metric-chip">
+                                    <span class="metric-key">Duration:</span>
+                                    <span class="metric-val" id="metric-duration">-</span>
+                                </div>
+                                <div class="metric-chip">
+                                    <span class="metric-key">Frames:</span>
+                                    <span class="metric-val" id="metric-frames">-</span>
+                                </div>
+                                <div class="metric-chip">
+                                    <span class="metric-key">Latency:</span>
+                                    <span class="metric-val" id="metric-time">-</span>
+                                </div>
+                            </div>
+
+                            <button id="btn-inspect-roi-link" class="btn-roi-inspect" type="button" title="View mouth crop and landmark frames">
+                                <span>🔍</span> Inspect Mouth Crops
+                            </button>
+                        </div>
+
+                    </div>
+
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- ============================================================
+         FOOTER: SLIM FIXED STATUS BAR
+         ============================================================ -->
+    <footer class="app-footer-bar" role="contentinfo">
+        <div class="footer-inner">
+            <div class="footer-credits">
+                <span>SilentSpeech VSR Engine</span> • 
+                <span class="footer-muted">Oxford / Imperial College Auto-AVSR + GRID Multi-Speaker Baseline</span>
+            </div>
+            <div class="footer-student">
+                <span>College Academic Project</span> • 
+                <span class="footer-muted">Deep Neural Visual Speech Processing</span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ============================================================
+         MODAL 1: VISUAL PIPELINE ROI INSPECTOR ("What the model sees")
+         ============================================================ -->
+    <div id="modal-visual-roi" class="app-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-visual-title" style="display: none;">
+        <div class="app-modal-dialog">
+            <div class="modal-dialog-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-icon">🔍</span>
+                    <h3 id="modal-visual-title" class="modal-title">Visual Lip Tracking & Preprocessing Pipeline</h3>
+                </div>
+                <button class="modal-close-btn" data-close-modal="modal-visual-roi" aria-label="Close modal">×</button>
+            </div>
+
+            <div class="modal-dialog-body">
+                <p class="modal-desc">
+                    SilentSpeech stabilizes facial movement and extracts the mouth region across all video frames before feeding it to the 3D-CNN / Conformer neural engine.
+                </p>
+
+                <!-- 3 Frame Cards -->
+                <div class="roi-cards-grid">
+                    <div class="roi-card">
+                        <div class="roi-card-header">
+                            <span class="roi-card-tag">Stage 1</span>
+                            <span class="roi-card-name">Face Landmark View</span>
+                        </div>
+                        <div class="roi-frame-box" id="analysis-original">
+                            <span class="roi-empty-tag">Awaiting video run</span>
+                        </div>
+                        <p class="roi-card-sub">MediaPipe / Facial Proportion tracking to localize center of speech.</p>
+                    </div>
+
+                    <div class="roi-card">
+                        <div class="roi-card-header">
+                            <span class="roi-card-tag">Stage 2</span>
+                            <span class="roi-card-name">Stabilized Mouth Crop</span>
+                        </div>
+                        <div class="roi-frame-box" id="analysis-cropped">
+                            <span class="roi-empty-tag">Awaiting video run</span>
+                        </div>
+                        <p class="roi-card-sub">EMA smoothed bounding box (96×96) tracking mouth opening & shape.</p>
+                    </div>
+
+                    <div class="roi-card">
+                        <div class="roi-card-header">
+                            <span class="roi-card-tag">Stage 3</span>
+                            <span class="roi-card-name">Normalized 88×88 Input</span>
+                        </div>
+                        <div class="roi-frame-box" id="analysis-processed">
+                            <span class="roi-empty-tag">Awaiting video run</span>
+                        </div>
+                        <p class="roi-card-sub">CLAHE adaptive contrast & temporal 25 FPS normalization for neural input.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-dialog-footer">
+                <span class="modal-footer-note">Frames update dynamically with each transcribed video.</span>
+                <button class="btn-modal-primary" data-close-modal="modal-visual-roi" type="button">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         MODAL 2: GROUND TRUTH & WORD ACCURACY CALCULATOR
+         ============================================================ -->
+    <div id="modal-ground-truth" class="app-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-gt-title" style="display: none;">
+        <div class="app-modal-dialog app-modal-dialog--sm">
+            <div class="modal-dialog-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-icon">🎯</span>
+                    <h3 id="modal-gt-title" class="modal-title">Ground Truth & Accuracy Comparison</h3>
+                </div>
+                <button class="modal-close-btn" data-close-modal="modal-ground-truth" aria-label="Close modal">×</button>
+            </div>
+
+            <div class="modal-dialog-body">
+                <p class="modal-desc">
+                    Enter what was actually spoken in the video. SilentSpeech will calculate the word-level match percentage and visually highlight matching vs. incorrect words in the transcript.
+                </p>
+
+                <div class="gt-input-group">
+                    <label for="ground-truth-input" class="gt-field-label">Actual Words Spoken:</label>
+                    <input type="text" id="ground-truth-input" class="gt-field-input" placeholder="e.g. It's or bin blue at F two now" autocomplete="off">
+                    <span class="gt-field-hint">Automatically filled when clicking any of the sample clips.</span>
+                </div>
+
+                <div class="gt-legend-box">
+                    <span class="legend-chip legend-chip--match"><span class="legend-color legend-color--green"></span> Correct Match</span>
+                    <span class="legend-chip legend-chip--diff"><span class="legend-color legend-color--red"></span> Mismatched / Inserted Word</span>
+                </div>
+            </div>
+
+            <div class="modal-dialog-footer">
+                <button id="btn-clear-gt" class="btn-modal-secondary" type="button">Clear</button>
+                <button class="btn-modal-primary" data-close-modal="modal-ground-truth" type="button">Save & Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         MODAL 3: MODEL ARCHITECTURES & COMPARISON GUIDE
+         ============================================================ -->
+    <div id="modal-info" class="app-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-info-title" style="display: none;">
+        <div class="app-modal-dialog">
+            <div class="modal-dialog-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-icon">ℹ️</span>
+                    <h3 id="modal-info-title" class="modal-title">Model Architectures & Research Context</h3>
+                </div>
+                <button class="modal-close-btn" data-close-modal="modal-info" aria-label="Close modal">×</button>
+            </div>
+
+            <div class="modal-dialog-body">
+                <div class="info-model-compare-grid">
+                    <div class="info-card info-card--avsr">
+                        <div class="info-card-header">
+                            <span class="info-card-badge info-card-badge--amber">Recommended</span>
+                            <h4 class="info-card-title">Auto-AVSR (LRS3 Open-Vocabulary)</h4>
+                        </div>
+                        <ul class="info-specs-list">
+                            <li><strong>Dataset:</strong> 400+ hours of natural TED Talks (LRS3).</li>
+                            <li><strong>Vocabulary:</strong> 5,000 SentencePiece subwords (Open English).</li>
+                            <li><strong>Architecture:</strong> Conformer Encoder-Decoder with Visual Beam Search.</li>
+                            <li><strong>Best for:</strong> Real, unrestricted conversational English sentences.</li>
+                        </ul>
+                    </div>
+
+                    <div class="info-card info-card--grid">
+                        <div class="info-card-header">
+                            <span class="info-card-badge">Baseline</span>
+                            <h4 class="info-card-title">GRID Baseline (51 Words)</h4>
+                        </div>
+                        <ul class="info-specs-list">
+                            <li><strong>Dataset:</strong> GRID Audio-Visual Corpus (33 speakers, 26,000 clips).</li>
+                            <li><strong>Vocabulary:</strong> Strict 51-word closed vocabulary.</li>
+                            <li><strong>Architecture:</strong> 3D-CNN + ResNet-18 + Bidirectional GRU + CTC.</li>
+                            <li><strong>Grammar Formula:</strong> <em>command + color + preposition + letter + digit + adverb</em>.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="info-callout-quote">
+                    "Lip reading without audio context is inherently ambiguous; even trained human lip readers achieve ~30% word accuracy on isolated silent video. SilentSpeech uses deep spatio-temporal representations to resolve viseme ambiguities."
+                </div>
+            </div>
+
+            <div class="modal-dialog-footer">
+                <button class="btn-modal-primary" data-close-modal="modal-info" type="button">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="app-toast-box" aria-live="polite"></div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ v }}"></script>
+</body>
+</html>
